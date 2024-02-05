@@ -2,13 +2,16 @@
 
 (define-type Exp
   (numE [n : Number])
+  (boolE [b : Number])
   (idE [s : Symbol])
   (plusE [l : Exp]
          [r : Exp])
   (multE [l : Exp]
          [r : Exp])
+  (greaterE [l : Exp]
+            [r : Exp])
   (appE [s : Symbol]
-        [arg : Exp]))
+        [arg : (Listof Exp)]))
 
 (define-type Func-Defn
   (fd [name : Symbol]
@@ -33,16 +36,30 @@
   (cond
     [(s-exp-match? `NUMBER s) (numE (s-exp->number s))]
     [(s-exp-match? `SYMBOL s) (idE (s-exp->symbol s))]
-    [(s-exp-match? `{+ ANY ANY} s)
-     (plusE (parse (second (s-exp->list s)))
-            (parse (third (s-exp->list s))))]
-    [(s-exp-match? `{* ANY ANY} s)
-     (multE (parse (second (s-exp->list s)))
-            (parse (third (s-exp->list s))))]
-    [(s-exp-match? `{SYMBOL ANY} s)
-     (appE (s-exp->symbol (first (s-exp->list s)))
-           (parse (second (s-exp->list s))))]
-    [else (error 'parse "invalid input")]))
+    [else
+     (let ([s-list (s-exp->list s)])
+       (cond
+         [(s-exp-match? `{+ ANY ANY} s)
+          (plusE (parse (second s-list))
+                 (parse (third s-list)))]
+         [(s-exp-match? `{* ANY ANY} s)
+          (multE (parse (second s-list))
+                 (parse (third s-list)))]
+         [(s-exp-match? `{> ANY ANY} s)
+          (greaterE (parse (second s-list))
+                    (parse (third s-list)))]
+         [(s-exp-match? `{SYMBOL ANY ...} s)
+          (appE (s-exp->symbol (first s-list))
+                (parse-helper (list->s-exp (rest s-list)))
+                )]
+         [else (error 'parse "invalid input")]))]))
+
+(define (parse-helper [s : S-Exp]): (Listof Exp)
+  (let ([s-list (s-exp->list s)])
+    (cond [(empty? s-list) '()]
+          [else (cons (parse(first s-list))
+                      (parse-helper (list->s-exp (rest s-list))))])))
+
 
 (define (parse-fundef [s : S-Exp]) : Func-Defn
   (cond
@@ -65,7 +82,7 @@
         (plusE (multE (numE 3) (numE 4))
                (numE 8)))
   (test (parse `{double 9})
-        (appE 'double (numE 9)))
+        (appE 'double (list (numE 9))))
   (test/exn (parse `{{+ 1 2}})
             "invalid input")
 
@@ -83,9 +100,12 @@
 (define (interp [a : Exp] [defs : (Listof Func-Defn)]) : Number
   (type-case Exp a
     [(numE n) n]
+    [(boolE n) n]
     [(idE s) (error 'interp "free variable")]
     [(plusE l r) (+ (interp l defs) (interp r defs))]
     [(multE l r) (* (interp l defs) (interp r defs))]
+    [(greaterE l r) (cond [(> (interp l defs) (interp r defs)) 1]
+                          [else 0])]
     [(appE s arg) (local [(define fd (get-fundef s defs))]
                     (interp (subst (numE (interp arg defs))
                                    (fd-arg fd)
@@ -136,6 +156,7 @@
 (define (subst [what : Exp] [for : Symbol] [in : Exp])
   (type-case Exp in
     [(numE n) in]
+    [(boolE n) in]
     [(idE s) (if (eq? for s)
                  what
                  in)]
@@ -143,6 +164,8 @@
                         (subst what for r))]
     [(multE l r) (multE (subst what for l)
                         (subst what for r))]
+    [(greaterE l r) (greaterE (subst what for l)
+                              (subst what for r))]
     [(appE s arg) (appE s (subst what for arg))]))
 
 (module+ test
@@ -159,6 +182,10 @@
   (test (subst (parse `8) 'x (parse `{double x}))
         (parse `{double 8})))
 
+;; max ----------------------------------------
+(define max-def
+  (parse-fundef `{define {max x y} {+ {* {> x y} x} {* {> y x} y}}}))
+
 (module+ test
   (test (parse `2)
         (numE 2))
@@ -170,11 +197,15 @@
         (multE (numE 3) (numE 4)))
   ;; (test (parse `{max 3 4})
   ;;       (maxE (numE 3) (numE 4)))
+  (test (interp (parse `{max 1 2})
+                (list max-def)) 2)
+  (test (interp (parse `{max {+ 4 5} {+ 2 3}})
+                (list max-def)) 9)
   (test (parse `{+ {* 3 4} 8})
         (plusE (multE (numE 3) (numE 4))
                (numE 8)))
-  ;; (test (parse `{double 9})
-  ;;       (appE 'double (list (numE 9))))
+  (test (parse `{double 9})
+        (appE 'double (list (numE 9))))
   (test (parse `{area 3 4})
         (appE 'area (list (numE 3) (numE 4))))
   (test (parse `{five})
