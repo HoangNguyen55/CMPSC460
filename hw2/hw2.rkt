@@ -11,11 +11,11 @@
   (greaterE [l : Exp]
             [r : Exp])
   (appE [s : Symbol]
-        [arg : (Listof Exp)]))
+        [args : (Listof Exp)]))
 
 (define-type Func-Defn
   (fd [name : Symbol]
-      [arg : Symbol]
+      [args : (Listof Symbol)]
       [body : Exp]))
 
 (module+ test
@@ -63,9 +63,9 @@
 
 (define (parse-fundef [s : S-Exp]) : Func-Defn
   (cond
-    [(s-exp-match? `{define {SYMBOL SYMBOL} ANY} s)
+    [(s-exp-match? `{define {SYMBOL SYMBOL ...} ANY} s)
      (fd (s-exp->symbol (first (s-exp->list (second (s-exp->list s)))))
-         (s-exp->symbol (second (s-exp->list (second (s-exp->list s)))))
+         (map s-exp->symbol (rest (s-exp->list (second (s-exp->list s)))))
          (parse (third (s-exp->list s))))]
     [else (error 'parse-fundef "invalid input")]))
 
@@ -87,7 +87,7 @@
             "invalid input")
 
   (test (parse-fundef `{define {double x} {+ x x}})
-        (fd 'double 'x (plusE (idE 'x) (idE 'x))))
+        (fd 'double '(x) (plusE (idE 'x) (idE 'x))))
   (test/exn (parse-fundef `{def {f x} x})
             "invalid input")
 
@@ -106,11 +106,27 @@
     [(multE l r) (* (interp l defs) (interp r defs))]
     [(greaterE l r) (cond [(> (interp l defs) (interp r defs)) 1]
                           [else 0])]
-    [(appE s arg) (local [(define fd (get-fundef s defs))]
-                    (interp (subst (numE (interp arg defs))
-                                   (fd-arg fd)
-                                   (fd-body fd))
-                            defs))]))
+    [(appE s args) (local [(define fd (get-fundef s defs))]
+                     (interp (interp-helper args (fd-body fd) (fd-args fd) defs) defs))]))
+
+;; Use a helper function to recursively apply substitution to each one of the args
+;; pseudo code
+;; func = Exp
+;; for i in args
+;;   func = subst(i, val(i), func)
+
+(define (interp-helper [args : (Listof Exp)] [fdbody : Exp] [fdargs : (Listof Symbol)] [defs : (Listof Func-Defn)]) : Exp
+  (cond [(empty? args) fdbody]
+        [else (let ([arg (first args)])
+                (interp-helper
+                 (rest args)
+                 (subst (numE (interp arg defs))
+                        (first fdargs)
+                        fdbody)
+                 (rest fdargs)
+                 defs
+                 ))]
+        ))
 
 (module+ test
   (test (interp (parse `2) empty)
@@ -153,7 +169,7 @@
             "undefined function"))
 
 ;; subst ----------------------------------------
-(define (subst [what : Exp] [for : Symbol] [in : Exp])
+(define (subst [what : Exp] [for : Symbol] [in : Exp]) : Exp
   (type-case Exp in
     [(numE n) in]
     [(boolE n) in]
@@ -166,7 +182,7 @@
                         (subst what for r))]
     [(greaterE l r) (greaterE (subst what for l)
                               (subst what for r))]
-    [(appE s arg) (appE s (subst what for arg))]))
+    [(appE s args) (appE s (map (lambda (arg) (subst what for arg)) args))]))
 
 (module+ test
   (test (subst (parse `8) 'x (parse `9))
