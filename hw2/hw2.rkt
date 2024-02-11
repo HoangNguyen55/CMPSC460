@@ -65,9 +65,18 @@
   (cond
     [(s-exp-match? `{define {SYMBOL SYMBOL ...} ANY} s)
      (fd (s-exp->symbol (first (s-exp->list (second (s-exp->list s)))))
-         (map s-exp->symbol (rest (s-exp->list (second (s-exp->list s)))))
+         (map s-exp->symbol (find-dupe (rest (s-exp->list (second (s-exp->list s)))) (hash '())))
          (parse (third (s-exp->list s))))]
     [else (error 'parse-fundef "invalid input")]))
+
+;; extra credit, find duplication, return error if it does, else return back the list
+(define (find-dupe [ss : (Listof S-Exp)] [found : (Hashof 'a 'b)]) : (Listof S-Exp)
+  (if (empty? ss) ss
+      (let ([s (first ss)])
+        (cond [(none? (hash-ref found s)) (cons s (find-dupe (rest ss) (hash-set found s 1)))]
+              [else (error 'parse-fundef "bad syntax")]
+              ))
+      ))
 
 (module+ test
   (test (parse `2)
@@ -212,8 +221,10 @@
         (plusE (numE 2) (numE 1)))
   (test (parse `{* 3 4})
         (multE (numE 3) (numE 4)))
+  ;; don't use this test
   ;; (test (parse `{max 3 4})
   ;;       (maxE (numE 3) (numE 4)))
+  ;; using the test from the canvas page
   (test (interp (parse `{max 1 2})
                 (list max-def)) 2)
   (test (interp (parse `{max {+ 4 5} {+ 2 3}})
@@ -236,8 +247,9 @@
         (fd 'area (list 'w 'h) (multE (idE 'w) (idE 'h))))
   (test (parse-fundef `{define {five} 5})
         (fd 'five (list) (numE 5)))
-  ;; (test/exn (parse-fundef `{define {f x x} x})
-  ;;           "bad syntax")
+  ;; extra credits
+  (test/exn (parse-fundef `{define {f x x} x})
+            "bad syntax")
   (test/exn (parse-fundef `{def {f x} x})
             "invalid input"))
 (module+ test
@@ -264,11 +276,13 @@
   (test (interp (parse `{quadruple 8})
                 (list double-def quadruple-def))
         32)
+  (test (interp (parse `{f 1 2})
+                (list (parse-fundef `{define {f x y} {+ x y}})))
+        3)
 
-  ;; idk what this is suppose to mean, so im ignoring it
-  ;; (test/exn (interp (parse `{double})
-  ;;                   (list double-def))
-  ;;           "wrong arity")
+  (test (interp (parse `{+ {f} {f}})
+                (list (parse-fundef `{define {f} 5})))
+        10)
   )
 
 
