@@ -125,7 +125,8 @@
 ;;   func = subst(i, val(i), func)
 
 (define (interp-helper [args : (Listof Exp)] [fdbody : Exp] [fdargs : (Listof Symbol)] [defs : (Listof Func-Defn)]) : Exp
-  (cond [(empty? args) fdbody]
+  (cond [(empty? args) (if (empty? fdargs) fdbody
+                           (error 'parse-fundef "wrong arity"))]
         [else (let ([arg (first args)])
                 (interp-helper
                  (rest args)
@@ -283,6 +284,9 @@
   (test (interp (parse `{+ {f} {f}})
                 (list (parse-fundef `{define {f} 5})))
         10)
+  (test/exn (interp (parse `{f 1})
+                    (list (parse-fundef `{define {f x y} {+ x y}})))
+            "wrong arity")
   )
 
 
