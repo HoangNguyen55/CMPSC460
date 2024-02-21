@@ -1,8 +1,7 @@
 #lang plait
 
 (define-type Value
-  (trueV [b : 'true])
-  (falseV [b : 'false])
+  (boolV [b : Boolean])
   (numV [n : Number])
   (closV [arg : Symbol]
          [body : Exp]
@@ -12,7 +11,8 @@
   )
 
 (define-type Exp
-  (boolE [b : Boolean])
+  (true)
+  (false)
   (numE [n : Number])
   (idE [s : Symbol])
   (plusE [l : Exp]
@@ -52,8 +52,8 @@
 ;; parse ----------------------------------------
 (define (parse [s : S-Exp]) : Exp
   (cond
-    [(s-exp-match? `true s) (boolE #t)]
-    [(s-exp-match? `false s) (boolE #f)]
+    [(s-exp-match? `true s) (true)]
+    [(s-exp-match? `false s) (false)]
     [(s-exp-match? `NUMBER s) (numE (s-exp->number s))]
     [(s-exp-match? `SYMBOL s) (idE (s-exp->symbol s))]
     [(s-exp-match? `{+ ANY ANY} s)
@@ -118,7 +118,10 @@
   ;; boolean
   (test (interp (parse `true)
                 mt-env)
-        (trueV 'true))
+        (boolV #t))
+  (test (interp (parse `false)
+                mt-env)
+        (boolV #f))
   (test (interp (parse `{if {= 2 {+ 1 1}} 7 8})
                 mt-env)
         (interp (parse `7)
@@ -139,7 +142,8 @@
 ;; interp ----------------------------------------
 (define (interp [a : Exp] [env : Env]) : Value
   (type-case Exp a
-    [(boolE b) (if b (trueV 'true) (falseV 'false))]
+    [(true) (boolV #t)]
+    [(false) (boolV #f)]
     [(numE n) (numV n)]
     [(idE s) (lookup s env)]
     [(plusE l r) (num+ (interp l env) (interp r env))]
@@ -152,8 +156,8 @@
     [(unletE n body) (interp body
                              (unlet-env n env))]
     [(ifE bool l r) (type-case Value (interp bool env)
-                      [(trueV _) (interp l env)]
-                      [(falseV _) (interp r env)]
+                      [(boolV val) (if val (interp l env)
+                                       (interp r env))]
                       [else (error 'interp "not a boolean")])]
     [(lamE n body) (closV n body env)]
     [(appE fun arg) (type-case Value (interp fun env)
@@ -298,7 +302,7 @@
 (define (bool-op [op : (Number Number -> Boolean)] [l : Value] [r : Value]) : Value
   (cond
     [(and (numV? l) (numV? r))
-     (if (op (numV-n l) (numV-n r)) (trueV 'true) (falseV 'false))]
+     (boolV (op (numV-n l) (numV-n r)))]
     [else
      (error 'interp "not a number")]))
 (define (num+ [l : Value] [r : Value]) : Value
