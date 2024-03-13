@@ -45,10 +45,13 @@
 (define-type-alias Store (Listof Storage))
 (define mt-store empty)
 (define (override-store [ bx : Storage ] [ store : Store ]): Store
-  (cond [(empty? store) (cons bx empty)]
+  (cond [(empty? store) (list bx)]
         [else
-        (let ([fn (lambda (sbx) (if (= (cell-location bx) (cell-location sbx)) bx sbx))])
-          (map fn store))]))
+        (let ([loc (cell-location bx)] [store-loc (cell-location (first store))])
+          (if (= loc store-loc)
+              (cons bx (rest store))
+              (cons (first store) (override-store bx (rest store)))))]))
+
 
 (define-type Result
   (v*s [v : Value] [s : Store]))
@@ -378,3 +381,165 @@
         (numV 9))
   (test/exn (fetch 2 mt-store)
             "unallocated location"))
+
+
+(module+ test
+  (test (parse `2)
+        (numE 2))
+  (test (parse `x) ; note: backquote instead of normal quote
+        (idE 'x))
+  (test (parse `{+ 2 1})
+        (plusE (numE 2) (numE 1)))
+  (test (parse `{* 3 4})
+        (multE (numE 3) (numE 4)))
+  (test (parse `{+ {* 3 4} 8})
+        (plusE (multE (numE 3) (numE 4))
+               (numE 8)))
+  (test (parse `{let {[x {+ 1 2}]}
+                  y})
+        (letE 'x (plusE (numE 1) (numE 2))
+              (idE 'y)))
+  (test (parse `{lambda {x} 9})
+        (lamE 'x (numE 9)))
+  (test (parse `{double 9})
+        (appE (idE 'double) (numE 9)))
+  (test (parse `{box 0})
+        (boxE (numE 0)))
+  (test (parse `{unbox b})
+        (unboxE (idE 'b)))
+  (test (parse `{set-box! b 0})
+        (setboxE (idE 'b) (numE 0)))
+  (test (parse `{begin 1 2})
+        (beginE (list (numE 1) (numE 2))))
+  (test/exn (parse `{{+ 1 2}})
+            "invalid input")
+  (test (interp (parse `2) mt-env mt-store)
+        (v*s (numV 2) 
+             mt-store))
+  (test/exn (interp (parse `x) mt-env mt-store)
+            "free variable")
+  (test (interp (parse `x) 
+                (extend-env (bind 'x (numV 9)) mt-env)
+                mt-store)
+        (v*s (numV 9)
+             mt-store))
+  (test (interp (parse `{+ 2 1}) mt-env mt-store)
+        (v*s (numV 3)
+             mt-store))
+  (test (interp (parse `{* 2 1}) mt-env mt-store)
+        (v*s (numV 2)
+             mt-store))
+  (test (interp (parse `{+ {* 2 3} {+ 5 8}})
+                mt-env
+                mt-store)
+        (v*s (numV 19)
+             mt-store))
+  (test (interp (parse `{lambda {x} {+ x x}})
+                mt-env
+                mt-store)
+        (v*s (closV 'x (plusE (idE 'x) (idE 'x)) mt-env)
+             mt-store))
+  (test (interp (parse `{let {[x 5]}
+                          {+ x x}})
+                mt-env
+                mt-store)
+        (v*s (numV 10)
+             mt-store))
+  (test (interp (parse `{let {[x 5]}
+                          {let {[x {+ 1 x}]}
+                            {+ x x}}})
+                mt-env
+                mt-store)
+        (v*s (numV 12)
+             mt-store))
+  (test (interp (parse `{let {[x 5]}
+                          {let {[y 6]}
+                            x}})
+                mt-env
+                mt-store)
+        (v*s (numV 5)
+             mt-store))
+  (test (interp (parse `{{lambda {x} {+ x x}} 8})
+                mt-env
+                mt-store)
+        (v*s (numV 16)
+             mt-store))
+  (test (interp (parse `{box 5})
+                mt-env
+                mt-store)
+        (v*s (boxV 1)
+             (override-store (cell 1 (numV 5))
+                             mt-store)))
+  (test (interp (parse `{unbox {box 5}})
+                mt-env
+                mt-store)
+        (v*s (numV 5)
+             (override-store (cell 1 (numV 5))
+                             mt-store)))
+  (test (interp (parse `{set-box! {box 5} 6})
+                mt-env
+                mt-store)
+        (v*s (numV 6)
+             (override-store (cell 1 (numV 6))
+                             mt-store)))
+  (test (interp (parse `{begin 1 2})
+                mt-env
+                mt-store)
+        (v*s (numV 2)
+             mt-store))
+  (test (interp (parse `{begin 1 2 3})
+                mt-env
+                mt-store)
+        (v*s (numV 3)
+             mt-store))
+  (test (interp (parse `{unbox {begin {box 5} {box 6}}})
+                mt-env
+                mt-store)
+        (v*s (numV 6)
+             (override-store (cell 2 (numV 6))
+                             (override-store (cell 1 (numV 5))
+                                             mt-store))))
+  (test (interp (parse `{let {[b (box 5)]}
+                          {begin
+                            {set-box! b 6}
+                            {unbox b}}})
+                mt-env
+                mt-store)
+        (v*s (numV 6)
+             (override-store (cell 1 (numV 6))
+                             mt-store)))
+  
+  (test/exn (interp (parse `{1 2}) mt-env mt-store)
+            "not a function")
+  (test/exn (interp (parse `{+ 1 {lambda {x} x}}) mt-env mt-store)
+            "not a number")
+  (test/exn (interp (parse `{let {[bad {lambda {x} {+ x y}}]}
+                              {let {[y 5]}
+                                {bad 2}}})
+                    mt-env
+                    mt-store)
+            "free variable")
+  (test/exn (interp (parse `{unbox 1}) mt-env mt-store)
+            "not a box")
+  (test/exn (interp (parse `{set-box! 1 1}) mt-env mt-store)
+            "not a box")
+  (test (max-address mt-store)
+        0)
+  (test (max-address (override-store (cell 2 (numV 9))
+                                     mt-store))
+        2)
+  
+  (test (fetch 2 (override-store (cell 2 (numV 9))
+                                 mt-store))
+        (numV 9))
+  (test (fetch 2 (override-store (cell 2 (numV 10))
+                                 (override-store (cell 2 (numV 9))
+                                                 mt-store)))
+        (numV 10))
+  (test (fetch 3 (override-store (cell 2 (numV 10))
+                                 (override-store (cell 3 (numV 9))
+                                                 mt-store)))
+        (numV 9))
+  (test/exn (fetch 2 mt-store)
+            "unallocated location")
+  )
