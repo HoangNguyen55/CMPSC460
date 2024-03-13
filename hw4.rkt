@@ -27,8 +27,7 @@
   (unboxE [arg : Exp])
   (setboxE [bx : Exp]
            [val : Exp])
-  (beginE [l : Exp]
-          [r : Exp]))
+  (beginE [bodies : (Listof Exp)]))
 
 (define-type Binding
   (bind [name : Symbol]
@@ -86,9 +85,8 @@
     [(s-exp-match? `{set-box! ANY ANY} s)
      (setboxE (parse (second (s-exp->list s)))
               (parse (third (s-exp->list s))))]
-    [(s-exp-match? `{begin ANY ANY} s)
-     (beginE (parse (second (s-exp->list s)))
-             (parse (third (s-exp->list s))))]
+    [(s-exp-match? `{begin ANY ...} s)
+     (beginE (map parse (rest (s-exp->list s))))]
     [(s-exp-match? `{ANY ANY} s)
      (appE (parse (first (s-exp->list s)))
            (parse (second (s-exp->list s))))]
@@ -121,7 +119,7 @@
   (test (parse `{set-box! b 0})
         (setboxE (idE 'b) (numE 0)))
   (test (parse `{begin 1 2})
-        (beginE (numE 1) (numE 2)))
+        (beginE (list (numE 1) (numE 2))))
   (test/exn (parse `{{+ 1 2}})
             "invalid input"))
 
@@ -186,9 +184,18 @@
                  (override-store (cell l v-v)
                                  sto-v))]
            [else (error 'interp "not a box")])))]
-    [(beginE l r)
-     (with [(v-l sto-l) (interp l env sto)]
-       (interp r env sto-l))]))
+    [(beginE bodies)
+     (interp-begin bodies env sto)
+     ]))
+
+(define (interp-begin [bodies : (Listof Exp)] [env : Env] [sto : Store]) : Result
+    (let ([body (first bodies)])
+     (with [(v-l sto-l) (interp body env sto)]
+        (if (empty? (rest bodies))
+            (interp body env sto)
+            (interp-begin (rest bodies) env sto-l)
+          )
+       )))
 
 (module+ test
   (test (interp (parse `2) mt-env mt-store)
